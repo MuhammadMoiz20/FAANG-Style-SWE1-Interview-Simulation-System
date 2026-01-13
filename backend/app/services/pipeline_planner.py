@@ -26,6 +26,13 @@ class PipelinePlanner:
         "debrief",
     ]
 
+    STATE_TRANSITIONS = {
+        "created": ["in_progress"],
+        "in_progress": ["completed"],
+        "completed": ["gated"],
+        "gated": [],
+    }
+
     def plan_pipeline(
         self, job_profile: JobProfile, candidate: Candidate
     ) -> tuple[List[str], Dict[str, str]]:
@@ -73,7 +80,9 @@ class PipelinePlanner:
         
         return None
 
-    def can_progress(self, stage_progress: Dict[str, str], stage: str) -> bool:
+    def can_progress(
+        self, stage_progress: Dict[str, str], stage: str, new_state: str | None = None
+    ) -> bool:
         """
         Check if a stage can progress (state machine validation).
         
@@ -82,19 +91,15 @@ class PipelinePlanner:
             stage: Stage to check
             
         Returns:
-            True if stage can progress to next state
+            True if stage can progress to next state or to new_state if provided
         """
         current_state = stage_progress.get(stage, "created")
-        
-        # State transitions: created -> in_progress -> completed -> gated
-        valid_transitions = {
-            "created": ["in_progress"],
-            "in_progress": ["completed"],
-            "completed": ["gated"],
-            "gated": [],  # Terminal state
-        }
-        
-        return bool(valid_transitions.get(current_state, []))
+        transitions = self.STATE_TRANSITIONS.get(current_state, [])
+
+        if new_state is None:
+            return bool(transitions)
+
+        return new_state in transitions
 
     def update_stage_state(
         self, stage_progress: Dict[str, str], stage: str, new_state: str
@@ -110,5 +115,17 @@ class PipelinePlanner:
         Returns:
             Updated stage_progress dict
         """
+        current_state = stage_progress.get(stage, "created")
+        if new_state == current_state:
+            return stage_progress
+
+        if new_state not in self.STATE_TRANSITIONS:
+            raise ValueError(f"Unknown stage state: {new_state}")
+
+        if not self.can_progress(stage_progress, stage, new_state=new_state):
+            raise ValueError(
+                f"Invalid transition for stage '{stage}': {current_state} -> {new_state}"
+            )
+
         stage_progress[stage] = new_state
         return stage_progress
