@@ -1,7 +1,5 @@
 """Candidate model."""
 
-from datetime import datetime, timezone
-
 from sqlalchemy import Column, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
