@@ -38,14 +38,14 @@ class PipelineRun(Base):
         SQLEnum(PipelineStatus, name="pipelinestatus"),
         nullable=False,
         default=PipelineStatus.CREATED,
-        server_default=text("CREATED"),
+        server_default=text("'CREATED'"),
         index=True,
     )
     current_stage = Column(String(100), nullable=True, index=True)  # e.g., "resume_screen", "oa", "phone_screen"
     
     # Stage tracking
-    stages = Column(JSON, nullable=False, server_default="[]")  # List of stage names in order
-    stage_progress = Column(JSON, nullable=False, server_default="{}")  # Dict[stage_name, state]
+    stages = Column(JSON, nullable=False, default=list, server_default="[]")  # List of stage names in order
+    stage_progress = Column(JSON, nullable=False, default=dict, server_default="{}")  # Dict[stage_name, state]
     # state: "created", "in_progress", "completed", "gated"
     
     # Metadata

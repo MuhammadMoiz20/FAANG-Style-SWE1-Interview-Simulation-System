@@ -43,11 +43,11 @@ class StageResult(Base):
     
     # Scores and data (flexible JSON)
     raw_scores = Column(JSON, nullable=True)  # Stage-specific scoring data
-    strengths = Column(JSON, nullable=False, server_default="[]")  # List[str]
-    concerns = Column(JSON, nullable=False, server_default="[]")  # List[str]
+    strengths = Column(JSON, nullable=False, default=list, server_default="[]")  # List[str]
+    concerns = Column(JSON, nullable=False, default=list, server_default="[]")  # List[str]
     
     # Artifacts (transcripts, code, etc.)
-    artifacts = Column(JSON, nullable=False, server_default="{}")  # Dict[artifact_name, data]
+    artifacts = Column(JSON, nullable=False, default=dict, server_default="{}")  # Dict[artifact_name, data]
     notes = Column(Text, nullable=True)
     
     # Metadata

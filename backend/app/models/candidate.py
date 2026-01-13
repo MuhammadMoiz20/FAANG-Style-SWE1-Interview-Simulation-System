@@ -35,4 +35,4 @@ class Candidate(Base):
     )
     
     # Relationships
-    pipeline_runs = relationship("PipelineRun", back_populates="candidate")
+    pipeline_runs = relationship("PipelineRun", back_populates="candidate", passive_deletes=True)

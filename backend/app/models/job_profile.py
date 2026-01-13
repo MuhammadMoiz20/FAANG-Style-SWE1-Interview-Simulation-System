@@ -25,12 +25,12 @@ class JobProfile(Base):
     raw_description = Column(Text, nullable=False)
     
     # Requirements
-    must_haves = Column(JSON, nullable=False, server_default="[]")  # List[str]
-    nice_to_haves = Column(JSON, nullable=False, server_default="[]")  # List[str]
-    core_competencies = Column(JSON, nullable=False, server_default="[]")  # List[str]
+    must_haves = Column(JSON, nullable=False, default=list, server_default="[]")  # List[str]
+    nice_to_haves = Column(JSON, nullable=False, default=list, server_default="[]")  # List[str]
+    core_competencies = Column(JSON, nullable=False, default=list, server_default="[]")  # List[str]
     
     # Interview style bias (0-1 scale)
-    interview_style_bias = Column(JSON, nullable=False, server_default="{}")  # Dict[str, float]
+    interview_style_bias = Column(JSON, nullable=False, default=dict, server_default="{}")  # Dict[str, float]
     # e.g., {"speed": 0.7, "communication": 0.6, "system_design": 0.2}
     
     # Metadata
@@ -48,4 +48,4 @@ class JobProfile(Base):
     )
     
     # Relationships
-    pipeline_runs = relationship("PipelineRun", back_populates="job_profile")
+    pipeline_runs = relationship("PipelineRun", back_populates="job_profile", passive_deletes=True)
