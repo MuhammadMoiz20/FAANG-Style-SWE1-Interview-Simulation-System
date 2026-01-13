@@ -1,5 +1,7 @@
 """Test pipeline planner service."""
 
+import pytest
+
 from app.models.candidate import Candidate
 from app.models.job_profile import JobProfile
 from app.services.pipeline_planner import PipelinePlanner
@@ -28,9 +30,16 @@ def test_plan_pipeline():
     stages, stage_progress = planner.plan_pipeline(job_profile, candidate)
     
     # Verify stages
-    assert len(stages) > 0
-    assert "resume_screen" in stages
-    assert "oa" in stages
+    assert stages == [
+        "resume_screen",
+        "oa",
+        "phone_screen",
+        "onsite_coding_1",
+        "onsite_coding_2",
+        "onsite_behavioral",
+        "onsite_design_lite",
+        "debrief",
+    ]
     
     # Verify all stages initialized to "created"
     for stage in stages:
@@ -80,3 +89,15 @@ def test_stage_state_transitions():
     
     # Gated cannot progress further
     assert planner.can_progress(stage_progress, "test_stage") is False
+
+
+def test_invalid_stage_state_transitions():
+    """Test that invalid transitions are blocked."""
+    planner = PipelinePlanner()
+    stage_progress = {"test_stage": "created"}
+
+    with pytest.raises(ValueError, match="Invalid transition"):
+        planner.update_stage_state(stage_progress, "test_stage", "completed")
+
+    with pytest.raises(ValueError, match="Unknown stage state"):
+        planner.update_stage_state(stage_progress, "test_stage", "unknown_state")
