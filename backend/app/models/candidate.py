@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -24,8 +24,17 @@ class Candidate(Base):
     resume_url = Column(String(500), nullable=True)
     
     # Metadata
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
     
     # Relationships
-    pipeline_runs = relationship("PipelineRun", back_populates="candidate")
+    pipeline_runs = relationship("PipelineRun", back_populates="candidate", cascade="all, delete-orphan")
