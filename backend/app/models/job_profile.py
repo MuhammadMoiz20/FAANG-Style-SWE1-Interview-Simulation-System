@@ -48,4 +48,4 @@ class JobProfile(Base):
     )
     
     # Relationships
-    pipeline_runs = relationship("PipelineRun", back_populates="job_profile", cascade="all, delete-orphan")
+    pipeline_runs = relationship("PipelineRun", back_populates="job_profile")

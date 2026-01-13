@@ -11,12 +11,12 @@ from app.database import Base
 class StageDecision(str, Enum):
     """Decision outcome for a stage."""
 
-    PROCEED = "proceed"
-    HOLD = "hold"
-    REJECT = "reject"
-    BORDERLINE = "borderline"
-    PASS = "pass"
-    FAIL = "fail"
+    PROCEED = "PROCEED"
+    HOLD = "HOLD"
+    REJECT = "REJECT"
+    BORDERLINE = "BORDERLINE"
+    PASS = "PASS"
+    FAIL = "FAIL"
 
 
 class StageResult(Base):

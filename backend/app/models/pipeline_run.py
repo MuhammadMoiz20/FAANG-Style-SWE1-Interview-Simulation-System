@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-from sqlalchemy import JSON, Column, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, func, Index
+from sqlalchemy import JSON, Column, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, func, Index, text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -11,11 +11,11 @@ from app.database import Base
 class PipelineStatus(str, Enum):
     """Pipeline execution status."""
 
-    CREATED = "created"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class PipelineRun(Base):
@@ -34,7 +34,13 @@ class PipelineRun(Base):
     job_profile_id = Column(Integer, ForeignKey("job_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Status
-    status = Column(SQLEnum(PipelineStatus, name="pipelinestatus"), nullable=False, default=PipelineStatus.CREATED, index=True)
+    status = Column(
+        SQLEnum(PipelineStatus, name="pipelinestatus"),
+        nullable=False,
+        default=PipelineStatus.CREATED,
+        server_default=text("CREATED"),
+        index=True,
+    )
     current_stage = Column(String(100), nullable=True, index=True)  # e.g., "resume_screen", "oa", "phone_screen"
     
     # Stage tracking
