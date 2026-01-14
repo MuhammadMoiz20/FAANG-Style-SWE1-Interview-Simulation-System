@@ -2,6 +2,7 @@
 
 import threading
 
+import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
@@ -91,6 +92,8 @@ def test_concurrent_start_returns_single_run(tmp_path):
 def test_concurrent_advance_only_moves_once(tmp_path):
     """Concurrent advance calls should not skip stages."""
     engine = _create_engine(tmp_path)
+    if engine.dialect.name == "sqlite":
+        pytest.skip("SQLite ignores SELECT FOR UPDATE; run against Postgres")
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

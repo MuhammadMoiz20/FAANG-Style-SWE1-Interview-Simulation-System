@@ -1,5 +1,7 @@
 """Pipeline router."""
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,15 @@ from app.schemas.stage_result import StageResultCompleteRequest, StageResultResp
 from app.services.pipeline_service import advance_pipeline_run, complete_stage_result, start_pipeline_run
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
+
+
+def _advance_helper_enabled() -> bool:
+    return os.getenv("PIPELINE_ADVANCE_HELPER_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 @router.post("/start", response_model=PipelineResponse, status_code=201)
@@ -56,6 +67,8 @@ async def advance_pipeline(
     This is a helper endpoint for testing stage progression.
     In production, stages advance based on stage results.
     """
+    if not _advance_helper_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
     pipeline_run = advance_pipeline_run(db, pipeline_id)
     return pipeline_run
 

@@ -1,5 +1,7 @@
 """Test pipeline API endpoints."""
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -22,6 +24,8 @@ def _set_sqlite_pragma(dbapi_connection, _connection_record):
 @pytest.fixture()
 def test_client():
     """Provide a TestClient with an isolated in-memory database."""
+    previous_env = os.environ.get("PIPELINE_ADVANCE_HELPER_ENABLED")
+    os.environ["PIPELINE_ADVANCE_HELPER_ENABLED"] = "true"
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -44,6 +48,10 @@ def test_client():
 
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+    if previous_env is None:
+        os.environ.pop("PIPELINE_ADVANCE_HELPER_ENABLED", None)
+    else:
+        os.environ["PIPELINE_ADVANCE_HELPER_ENABLED"] = previous_env
 
 
 def create_candidate(db):

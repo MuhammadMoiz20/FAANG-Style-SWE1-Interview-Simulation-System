@@ -28,6 +28,7 @@ $$ LANGUAGE plpgsql;
 
 def upgrade() -> None:
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
 
     # Deduplicate stage_results before enforcing uniqueness.
     op.execute(
@@ -40,12 +41,22 @@ def upgrade() -> None:
         """
     )
 
-    op.drop_index("ix_stage_results_pipeline_stage", table_name="stage_results")
-    op.create_unique_constraint(
-        "uq_stage_results_pipeline_stage",
-        "stage_results",
-        ["pipeline_run_id", "stage_name"],
-    )
+    existing_stage_indexes = {
+        index["name"] for index in inspector.get_indexes("stage_results")
+    }
+    existing_stage_constraints = {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("stage_results")
+        if constraint.get("name")
+    }
+    if "ix_stage_results_pipeline_stage" in existing_stage_indexes:
+        op.drop_index("ix_stage_results_pipeline_stage", table_name="stage_results")
+    if "uq_stage_results_pipeline_stage" not in existing_stage_constraints:
+        op.create_unique_constraint(
+            "uq_stage_results_pipeline_stage",
+            "stage_results",
+            ["pipeline_run_id", "stage_name"],
+        )
 
     # Ensure only one active pipeline run per candidate/job profile.
     op.execute(
@@ -65,14 +76,18 @@ def upgrade() -> None:
         """
     )
 
-    op.create_index(
-        "uq_pipeline_runs_candidate_job_active",
-        "pipeline_runs",
-        ["candidate_id", "job_profile_id"],
-        unique=True,
-        postgresql_where=sa.text("status IN ('created', 'in_progress')"),
-        sqlite_where=sa.text("status IN ('created', 'in_progress')"),
-    )
+    existing_pipeline_indexes = {
+        index["name"] for index in inspector.get_indexes("pipeline_runs")
+    }
+    if "uq_pipeline_runs_candidate_job_active" not in existing_pipeline_indexes:
+        op.create_index(
+            "uq_pipeline_runs_candidate_job_active",
+            "pipeline_runs",
+            ["candidate_id", "job_profile_id"],
+            unique=True,
+            postgresql_where=sa.text("status IN ('created', 'in_progress')"),
+            sqlite_where=sa.text("status IN ('created', 'in_progress')"),
+        )
 
     op.execute(UPDATED_AT_TRIGGER_SQL)
     for table in ("candidates", "job_profiles", "pipeline_runs", "stage_results"):
@@ -89,16 +104,3 @@ def downgrade() -> None:
     for table in ("candidates", "job_profiles", "pipeline_runs", "stage_results"):
         op.execute(f"DROP TRIGGER IF EXISTS trg_set_updated_at_{table} ON {table}")
     op.execute("DROP FUNCTION IF EXISTS set_updated_at_timestamp()")
-
-    op.drop_index("uq_pipeline_runs_candidate_job_active", table_name="pipeline_runs")
-
-    op.drop_constraint(
-        "uq_stage_results_pipeline_stage",
-        "stage_results",
-        type_="unique",
-    )
-    op.create_index(
-        "ix_stage_results_pipeline_stage",
-        "stage_results",
-        ["pipeline_run_id", "stage_name"],
-    )

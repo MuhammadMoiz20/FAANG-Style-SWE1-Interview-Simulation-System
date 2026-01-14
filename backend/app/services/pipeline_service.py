@@ -154,7 +154,10 @@ def complete_stage_result(
             raise HTTPException(status_code=400, detail="Stage not part of pipeline")
 
         if pipeline_run.status in TERMINAL_PIPELINE_STATUSES:
-            raise HTTPException(status_code=400, detail="Pipeline already completed")
+            if pipeline_run.status != PipelineStatus.COMPLETED:
+                raise HTTPException(status_code=400, detail="Pipeline already completed")
+            if stage_name != pipeline_run.stages[-1]:
+                raise HTTPException(status_code=400, detail="Pipeline already completed")
 
         if pipeline_run.current_stage != stage_name:
             raise HTTPException(status_code=409, detail="Stage completion out of order")

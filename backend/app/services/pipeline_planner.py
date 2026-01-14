@@ -119,11 +119,11 @@ class PipelinePlanner:
             Updated stage_progress dict
         """
         current_state = stage_progress.get(stage, "created")
-        if new_state == current_state:
-            return stage_progress
-
         if new_state not in self.VALID_TARGET_STATES:
             raise ValueError(f"Unknown stage state: {new_state}")
+
+        if new_state == current_state:
+            return stage_progress
 
         if not self.can_progress(stage_progress, stage, new_state=new_state):
             raise ValueError(
