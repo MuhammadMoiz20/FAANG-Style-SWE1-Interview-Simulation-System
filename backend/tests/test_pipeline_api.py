@@ -2,14 +2,21 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Candidate, JobProfile, PipelineRun
+from app.models import Candidate, JobProfile, PipelineRun, StageResult
+from app.models.pipeline_run import PipelineStatus
 from app.services.pipeline_planner import PipelinePlanner
+
+
+def _set_sqlite_pragma(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 @pytest.fixture()
@@ -20,6 +27,7 @@ def test_client():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    event.listen(engine, "connect", _set_sqlite_pragma)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
 
@@ -71,6 +79,32 @@ def create_candidate_and_job_profile(db):
     return candidate, job_profile
 
 
+def create_pipeline_run(
+    db,
+    candidate_id,
+    job_profile_id,
+    status=PipelineStatus.CREATED,
+    current_stage=None,
+    stage_progress=None,
+):
+    """Create a pipeline run with optional overrides."""
+    stages = PipelinePlanner.STANDARD_STAGES
+    if stage_progress is None:
+        stage_progress = {stage: "created" for stage in stages}
+    pipeline_run = PipelineRun(
+        candidate_id=candidate_id,
+        job_profile_id=job_profile_id,
+        status=status,
+        stages=stages,
+        stage_progress=stage_progress,
+        current_stage=current_stage,
+    )
+    db.add(pipeline_run)
+    db.commit()
+    db.refresh(pipeline_run)
+    return pipeline_run
+
+
 def test_start_pipeline_creates_run(test_client):
     """POST /pipeline/start should create a pipeline run with planned stages."""
     client, session_factory = test_client
@@ -89,7 +123,7 @@ def test_start_pipeline_creates_run(test_client):
 
     assert data["candidate_id"] == candidate.id
     assert data["job_profile_id"] == job_profile.id
-    assert data["status"] == "CREATED"
+    assert data["status"] == PipelineStatus.CREATED.value
     assert data["current_stage"] is None
     assert data["stages"] == expected_stages
     assert data["stage_progress"] == expected_progress
@@ -131,6 +165,16 @@ def test_start_pipeline_missing_job_profile_returns_404(test_client):
     assert response.json()["detail"] == "Job profile not found"
 
 
+def test_start_pipeline_negative_ids_rejected(test_client):
+    """POST /pipeline/start should reject negative IDs."""
+    client, _session_factory = test_client
+    response = client.post(
+        "/pipeline/start",
+        json={"candidate_id": -1, "job_profile_id": -2},
+    )
+    assert response.status_code == 422
+
+
 def test_get_pipeline_returns_data(test_client):
     """GET /pipeline/{id} should return pipeline data."""
     client, session_factory = test_client
@@ -153,6 +197,241 @@ def test_get_pipeline_returns_data(test_client):
     assert data["id"] == pipeline_id
     assert data["candidate_id"] == candidate.id
     assert data["job_profile_id"] == job_profile.id
-    assert data["status"] == "CREATED"
+    assert data["status"] == PipelineStatus.CREATED.value
     assert data["stages"] == expected_stages
     assert data["stage_progress"] == expected_progress
+
+
+def test_start_pipeline_idempotent_returns_existing(test_client):
+    """POST /pipeline/start should return existing run for active candidate/job profile."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+
+    first = client.post(
+        "/pipeline/start",
+        json={"candidate_id": candidate.id, "job_profile_id": job_profile.id},
+    )
+    second = client.post(
+        "/pipeline/start",
+        json={"candidate_id": candidate.id, "job_profile_id": job_profile.id},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+
+    with session_factory() as db:
+        runs = (
+            db.query(PipelineRun)
+            .filter(
+                PipelineRun.candidate_id == candidate.id,
+                PipelineRun.job_profile_id == job_profile.id,
+                PipelineRun.status.in_(
+                    [PipelineStatus.CREATED.value, PipelineStatus.IN_PROGRESS.value]
+                ),
+            )
+            .all()
+        )
+        assert len(runs) == 1
+
+
+def test_advance_pipeline_happy_path(test_client):
+    """POST /pipeline/{id}/advance should move to first stage."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_stage"] == PipelinePlanner.STANDARD_STAGES[0]
+    assert data["stage_progress"][PipelinePlanner.STANDARD_STAGES[0]] == "in_progress"
+    assert data["status"] == PipelineStatus.IN_PROGRESS.value
+
+
+def test_advance_pipeline_current_stage_not_completed(test_client):
+    """Advance should fail if current stage is not completed."""
+    client, session_factory = test_client
+    stages = PipelinePlanner.STANDARD_STAGES
+    stage_progress = {stage: "created" for stage in stages}
+    stage_progress[stages[0]] = "in_progress"
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(
+            db,
+            candidate.id,
+            job_profile.id,
+            status=PipelineStatus.IN_PROGRESS,
+            current_stage=stages[0],
+            stage_progress=stage_progress,
+        )
+
+    response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Current stage not completed"
+
+
+def test_advance_pipeline_invalid_current_stage(test_client):
+    """Advance should fail on invalid current_stage values."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(
+            db,
+            candidate.id,
+            job_profile.id,
+            current_stage="unknown_stage",
+        )
+
+    response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Pipeline current stage is invalid"
+
+
+def test_advance_pipeline_past_final_stage(test_client):
+    """Advance should fail when already at final stage."""
+    client, session_factory = test_client
+    stages = PipelinePlanner.STANDARD_STAGES
+    stage_progress = {stage: "created" for stage in stages}
+    stage_progress[stages[-1]] = "completed"
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(
+            db,
+            candidate.id,
+            job_profile.id,
+            status=PipelineStatus.IN_PROGRESS,
+            current_stage=stages[-1],
+            stage_progress=stage_progress,
+        )
+
+    response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Pipeline already at final stage"
+
+
+def test_advance_pipeline_already_completed(test_client):
+    """Advance should fail for completed pipelines."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(
+            db,
+            candidate.id,
+            job_profile.id,
+            status=PipelineStatus.COMPLETED,
+        )
+
+    response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Pipeline already completed"
+
+
+def test_complete_stage_happy_path(test_client):
+    """Completing a stage should upsert StageResult and update progress."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    advance_response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+    assert advance_response.status_code == 200
+    stage_name = advance_response.json()["current_stage"]
+
+    complete_response = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/{stage_name}/complete",
+        json={"decision": "pass", "notes": "Looks good"},
+    )
+
+    assert complete_response.status_code == 200
+    data = complete_response.json()
+    assert data["pipeline_run_id"] == pipeline_run.id
+    assert data["stage_name"] == stage_name
+    assert data["decision"] == "pass"
+
+    with session_factory() as db:
+        updated = db.get(PipelineRun, pipeline_run.id)
+        assert updated.stage_progress[stage_name] == "completed"
+        stage_results = (
+            db.query(StageResult)
+            .filter(StageResult.pipeline_run_id == pipeline_run.id)
+            .all()
+        )
+        assert len(stage_results) == 1
+
+
+def test_complete_stage_invalid_stage(test_client):
+    """Completing a non-existent stage should return 400."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    response = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/invalid_stage/complete",
+        json={"decision": "pass"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Stage not part of pipeline"
+
+
+def test_complete_stage_out_of_order(test_client):
+    """Completing a stage before it is current should return 409."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    response = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/{PipelinePlanner.STANDARD_STAGES[0]}/complete",
+        json={"decision": "pass"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Stage completion out of order"
+
+
+def test_complete_stage_idempotent(test_client):
+    """Completing the same stage twice should not create duplicates."""
+    client, session_factory = test_client
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    advance_response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+    stage_name = advance_response.json()["current_stage"]
+
+    first = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/{stage_name}/complete",
+        json={"decision": "pass"},
+    )
+    second = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/{stage_name}/complete",
+        json={"decision": "pass"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with session_factory() as db:
+        stage_results = (
+            db.query(StageResult)
+            .filter(StageResult.pipeline_run_id == pipeline_run.id)
+            .all()
+        )
+        assert len(stage_results) == 1
+
+
+def test_negative_pipeline_id_rejected(test_client):
+    """Negative pipeline IDs should be rejected by validation."""
+    client, _session_factory = test_client
+    response = client.get("/pipeline/-1")
+    assert response.status_code == 422

@@ -2,7 +2,19 @@
 
 from enum import Enum
 
-from sqlalchemy import JSON, Column, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, func, Index
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Enum as SQLEnum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    Index,
+)
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -11,12 +23,12 @@ from app.database import Base
 class StageDecision(str, Enum):
     """Decision outcome for a stage."""
 
-    PROCEED = "PROCEED"
-    HOLD = "HOLD"
-    REJECT = "REJECT"
-    BORDERLINE = "BORDERLINE"
-    PASS = "PASS"
-    FAIL = "FAIL"
+    PROCEED = "proceed"
+    HOLD = "hold"
+    REJECT = "reject"
+    BORDERLINE = "borderline"
+    PASS = "pass"
+    FAIL = "fail"
 
 
 class StageResult(Base):
@@ -70,7 +82,7 @@ class StageResult(Base):
     
     # Composite indexes
     __table_args__ = (
-        Index("ix_stage_results_pipeline_stage", "pipeline_run_id", "stage_name"),
+        UniqueConstraint("pipeline_run_id", "stage_name", name="uq_stage_results_pipeline_stage"),
         Index("ix_stage_results_pipeline_type", "pipeline_run_id", "stage_type"),
         Index("ix_stage_results_pipeline_decision", "pipeline_run_id", "decision"),
     )

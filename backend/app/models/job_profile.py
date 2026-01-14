@@ -48,4 +48,5 @@ class JobProfile(Base):
     )
     
     # Relationships
+    # passive_deletes relies on DB-level ON DELETE CASCADE to remove related rows.
     pipeline_runs = relationship("PipelineRun", back_populates="job_profile", passive_deletes=True)

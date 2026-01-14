@@ -32,6 +32,9 @@ class PipelinePlanner:
         "completed": ["gated"],
         "gated": [],
     }
+    VALID_TARGET_STATES = {
+        state for transitions in STATE_TRANSITIONS.values() for state in transitions
+    }
 
     def plan_pipeline(
         self, job_profile: JobProfile, candidate: Candidate
@@ -119,7 +122,7 @@ class PipelinePlanner:
         if new_state == current_state:
             return stage_progress
 
-        if new_state not in self.STATE_TRANSITIONS:
+        if new_state not in self.VALID_TARGET_STATES:
             raise ValueError(f"Unknown stage state: {new_state}")
 
         if not self.can_progress(stage_progress, stage, new_state=new_state):
