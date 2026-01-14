@@ -100,4 +100,7 @@ def test_invalid_stage_state_transitions():
         planner.update_stage_state(stage_progress, "test_stage", "completed")
 
     with pytest.raises(ValueError, match="Unknown stage state"):
+        planner.update_stage_state(stage_progress, "test_stage", "created")
+
+    with pytest.raises(ValueError, match="Unknown stage state"):
         planner.update_stage_state(stage_progress, "test_stage", "unknown_state")

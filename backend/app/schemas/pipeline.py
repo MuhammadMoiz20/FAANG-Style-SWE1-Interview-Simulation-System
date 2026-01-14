@@ -3,14 +3,14 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PipelineStartRequest(BaseModel):
     """Request to start a new pipeline run."""
 
-    candidate_id: int = Field(..., description="Candidate ID")
-    job_profile_id: int = Field(..., description="Job profile ID")
+    candidate_id: int = Field(..., description="Candidate ID", gt=0)
+    job_profile_id: int = Field(..., description="Job profile ID", gt=0)
 
 
 class PipelineResponse(BaseModel):
@@ -28,5 +28,4 @@ class PipelineResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -9,7 +9,7 @@ from app.models.candidate import Candidate
 class PipelinePlanner:
     """
     Pipeline Planner service.
-    
+
     Determines the stages a candidate should go through based on
     job profile and candidate metadata.
     """
@@ -26,11 +26,21 @@ class PipelinePlanner:
         "debrief",
     ]
 
+    # Stage state machine transitions.
+    # States:
+    # - created: Stage is planned but not yet started
+    # - in_progress: Stage is currently being executed
+    # - completed: Stage finished successfully
+    # - gated: Reserved for future use - e.g., when a stage requires additional
+    #          approval before proceeding, or when a candidate is put on hold
     STATE_TRANSITIONS = {
         "created": ["in_progress"],
         "in_progress": ["completed"],
         "completed": ["gated"],
         "gated": [],
+    }
+    VALID_TARGET_STATES = {
+        state for transitions in STATE_TRANSITIONS.values() for state in transitions
     }
 
     def plan_pipeline(
@@ -116,11 +126,11 @@ class PipelinePlanner:
             Updated stage_progress dict
         """
         current_state = stage_progress.get(stage, "created")
+        if new_state not in self.VALID_TARGET_STATES:
+            raise ValueError(f"Unknown stage state: {new_state}")
+
         if new_state == current_state:
             return stage_progress
-
-        if new_state not in self.STATE_TRANSITIONS:
-            raise ValueError(f"Unknown stage state: {new_state}")
 
         if not self.can_progress(stage_progress, stage, new_state=new_state):
             raise ValueError(

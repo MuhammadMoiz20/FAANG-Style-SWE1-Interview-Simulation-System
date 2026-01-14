@@ -18,10 +18,25 @@ depends_on = None
 
 def upgrade() -> None:
     # Create enums first
-    pipelinestatus_enum = sa.Enum('CREATED', 'IN_PROGRESS', 'COMPLETED', 'FAILED', 'CANCELLED', name='pipelinestatus')
+    pipelinestatus_enum = sa.Enum(
+        'created',
+        'in_progress',
+        'completed',
+        'failed',
+        'cancelled',
+        name='pipelinestatus',
+    )
     pipelinestatus_enum.create(op.get_bind(), checkfirst=True)
     
-    stagedecision_enum = sa.Enum('PROCEED', 'HOLD', 'REJECT', 'BORDERLINE', 'PASS', 'FAIL', name='stagedecision')
+    stagedecision_enum = sa.Enum(
+        'proceed',
+        'hold',
+        'reject',
+        'borderline',
+        'pass',
+        'fail',
+        name='stagedecision',
+    )
     stagedecision_enum.create(op.get_bind(), checkfirst=True)
     
     # Create candidates table
@@ -66,7 +81,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('candidate_id', sa.Integer(), nullable=False),
         sa.Column('job_profile_id', sa.Integer(), nullable=False),
-        sa.Column('status', pipelinestatus_enum, nullable=False, server_default='CREATED'),
+        sa.Column('status', pipelinestatus_enum, nullable=False, server_default='created'),
         sa.Column('current_stage', sa.String(length=100), nullable=True),
         sa.Column('stages', postgresql.JSON(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::json")),
         sa.Column('stage_progress', postgresql.JSON(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::json")),
@@ -85,6 +100,14 @@ def upgrade() -> None:
     op.create_index(op.f('ix_pipeline_runs_current_stage'), 'pipeline_runs', ['current_stage'], unique=False)
     op.create_index('ix_pipeline_runs_candidate_status', 'pipeline_runs', ['candidate_id', 'status'], unique=False)
     op.create_index('ix_pipeline_runs_job_profile_status', 'pipeline_runs', ['job_profile_id', 'status'], unique=False)
+    op.create_index(
+        'uq_pipeline_runs_candidate_job_active',
+        'pipeline_runs',
+        ['candidate_id', 'job_profile_id'],
+        unique=True,
+        postgresql_where=sa.text("status IN ('created', 'in_progress')"),
+        sqlite_where=sa.text("status IN ('created', 'in_progress')"),
+    )
 
     # Create stage_results table
     op.create_table(
@@ -104,14 +127,14 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['pipeline_run_id'], ['pipeline_runs.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id')
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('pipeline_run_id', 'stage_name', name='uq_stage_results_pipeline_stage'),
     )
     op.create_index(op.f('ix_stage_results_id'), 'stage_results', ['id'], unique=False)
     op.create_index(op.f('ix_stage_results_pipeline_run_id'), 'stage_results', ['pipeline_run_id'], unique=False)
     op.create_index(op.f('ix_stage_results_stage_name'), 'stage_results', ['stage_name'], unique=False)
     op.create_index(op.f('ix_stage_results_stage_type'), 'stage_results', ['stage_type'], unique=False)
     op.create_index(op.f('ix_stage_results_decision'), 'stage_results', ['decision'], unique=False)
-    op.create_index('ix_stage_results_pipeline_stage', 'stage_results', ['pipeline_run_id', 'stage_name'], unique=False)
     op.create_index('ix_stage_results_pipeline_type', 'stage_results', ['pipeline_run_id', 'stage_type'], unique=False)
     op.create_index('ix_stage_results_pipeline_decision', 'stage_results', ['pipeline_run_id', 'decision'], unique=False)
 
@@ -120,7 +143,7 @@ def downgrade() -> None:
     # Drop indexes
     op.drop_index('ix_stage_results_pipeline_decision', table_name='stage_results')
     op.drop_index('ix_stage_results_pipeline_type', table_name='stage_results')
-    op.drop_index('ix_stage_results_pipeline_stage', table_name='stage_results')
+    op.drop_constraint('uq_stage_results_pipeline_stage', table_name='stage_results', type_='unique')
     op.drop_index(op.f('ix_stage_results_decision'), table_name='stage_results')
     op.drop_index(op.f('ix_stage_results_stage_type'), table_name='stage_results')
     op.drop_index(op.f('ix_stage_results_stage_name'), table_name='stage_results')
@@ -130,6 +153,7 @@ def downgrade() -> None:
     
     op.drop_index('ix_pipeline_runs_job_profile_status', table_name='pipeline_runs')
     op.drop_index('ix_pipeline_runs_candidate_status', table_name='pipeline_runs')
+    op.drop_index('uq_pipeline_runs_candidate_job_active', table_name='pipeline_runs')
     op.drop_index(op.f('ix_pipeline_runs_current_stage'), table_name='pipeline_runs')
     op.drop_index(op.f('ix_pipeline_runs_status'), table_name='pipeline_runs')
     op.drop_index(op.f('ix_pipeline_runs_job_profile_id'), table_name='pipeline_runs')
