@@ -9,7 +9,7 @@ from app.models.candidate import Candidate
 class PipelinePlanner:
     """
     Pipeline Planner service.
-    
+
     Determines the stages a candidate should go through based on
     job profile and candidate metadata.
     """
@@ -26,6 +26,13 @@ class PipelinePlanner:
         "debrief",
     ]
 
+    # Stage state machine transitions.
+    # States:
+    # - created: Stage is planned but not yet started
+    # - in_progress: Stage is currently being executed
+    # - completed: Stage finished successfully
+    # - gated: Reserved for future use - e.g., when a stage requires additional
+    #          approval before proceeding, or when a candidate is put on hold
     STATE_TRANSITIONS = {
         "created": ["in_progress"],
         "in_progress": ["completed"],

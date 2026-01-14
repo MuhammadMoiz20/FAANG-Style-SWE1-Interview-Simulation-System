@@ -16,6 +16,17 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
+    if bind.dialect.name == "postgresql":
+        _upgrade_postgresql(op, bind)
+    else:
+        # SQLite: enums are stored as TEXT, just normalize case
+        _upgrade_sqlite(op)
+
+
+def _upgrade_postgresql(op, bind):
+    """PostgreSQL-specific enum migration."""
     pipelinestatus_new = sa.Enum(
         "created",
         "in_progress",
@@ -34,7 +45,6 @@ def upgrade() -> None:
         name="stagedecision_new",
     )
 
-    bind = op.get_bind()
     pipelinestatus_new.create(bind, checkfirst=False)
     stagedecision_new.create(bind, checkfirst=False)
 
@@ -59,9 +69,28 @@ def upgrade() -> None:
     op.execute("ALTER TYPE stagedecision_new RENAME TO stagedecision")
 
 
+def _upgrade_sqlite(op):
+    """SQLite enum normalization - just lowercase existing values."""
+    op.execute(
+        "UPDATE pipeline_runs SET status = LOWER(status) WHERE status != LOWER(status)"
+    )
+    op.execute(
+        "UPDATE stage_results SET decision = LOWER(decision) WHERE decision IS NOT NULL AND decision != LOWER(decision)"
+    )
+
+
 def downgrade() -> None:
     bind = op.get_bind()
 
+    if bind.dialect.name == "postgresql":
+        _downgrade_postgresql(op, bind)
+    else:
+        # SQLite: convert back to uppercase
+        _downgrade_sqlite(op)
+
+
+def _downgrade_postgresql(op, bind):
+    """PostgreSQL-specific enum downgrade."""
     op.execute("ALTER TABLE pipeline_runs ALTER COLUMN status DROP DEFAULT")
     op.execute("ALTER TABLE pipeline_runs ALTER COLUMN status TYPE TEXT")
     op.execute("ALTER TABLE stage_results ALTER COLUMN decision TYPE TEXT")
@@ -106,3 +135,11 @@ def downgrade() -> None:
 
     op.execute("ALTER TYPE pipelinestatus_old RENAME TO pipelinestatus")
     op.execute("ALTER TYPE stagedecision_old RENAME TO stagedecision")
+
+
+def _downgrade_sqlite(op):
+    """SQLite enum downgrade - convert back to uppercase."""
+    op.execute("UPDATE pipeline_runs SET status = UPPER(status)")
+    op.execute(
+        "UPDATE stage_results SET decision = UPPER(decision) WHERE decision IS NOT NULL"
+    )

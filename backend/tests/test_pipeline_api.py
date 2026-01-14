@@ -443,3 +443,81 @@ def test_negative_pipeline_id_rejected(test_client):
     client, _session_factory = test_client
     response = client.get("/pipeline/-1")
     assert response.status_code == 422
+
+
+def test_zero_pipeline_id_rejected(test_client):
+    """Zero pipeline ID should be rejected by validation."""
+    client, _session_factory = test_client
+    response = client.get("/pipeline/0")
+    assert response.status_code == 422
+
+
+def test_start_pipeline_zero_id_returns_422(test_client):
+    """ID of 0 should be rejected by validation."""
+    client, _session_factory = test_client
+    response = client.post(
+        "/pipeline/start",
+        json={"candidate_id": 0, "job_profile_id": 1},
+    )
+    assert response.status_code == 422
+
+
+def test_complete_final_stage_marks_pipeline_completed(test_client):
+    """Completing the final stage should set pipeline status to COMPLETED."""
+    client, session_factory = test_client
+    stages = PipelinePlanner.STANDARD_STAGES
+
+    with session_factory() as db:
+        candidate, job_profile = create_candidate_and_job_profile(db)
+        # Advance through all stages to the last one
+        pipeline_run = create_pipeline_run(db, candidate.id, job_profile.id)
+
+    # Advance to and complete all stages except the last
+    for stage in stages[:-1]:
+        client.post(f"/pipeline/{pipeline_run.id}/advance")
+        client.post(
+            f"/pipeline/{pipeline_run.id}/stages/{stage}/complete",
+            json={"decision": "pass"},
+        )
+
+    # Advance to final stage
+    advance_response = client.post(f"/pipeline/{pipeline_run.id}/advance")
+    final_stage = advance_response.json()["current_stage"]
+    assert final_stage == stages[-1]
+
+    # Complete final stage
+    complete_response = client.post(
+        f"/pipeline/{pipeline_run.id}/stages/{final_stage}/complete",
+        json={"decision": "pass"},
+    )
+    assert complete_response.status_code == 200
+
+    # Verify pipeline is completed
+    with session_factory() as db:
+        pipeline = db.get(PipelineRun, pipeline_run.id)
+        assert pipeline.status == PipelineStatus.COMPLETED.value
+        assert pipeline.completed_at is not None
+
+
+def test_get_pipeline_not_found(test_client):
+    """GET /pipeline/{id} should return 404 for non-existent pipeline."""
+    client, _session_factory = test_client
+    response = client.get("/pipeline/99999")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Pipeline run not found"
+
+
+def test_advance_pipeline_not_found(test_client):
+    """Advance should return 404 for non-existent pipeline."""
+    client, _session_factory = test_client
+    response = client.post("/pipeline/99999/advance")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Pipeline run not found"
+
+
+def test_complete_stage_pipeline_not_found(test_client):
+    """Complete stage should return 404 for non-existent pipeline."""
+    client, _session_factory = test_client
+    response = client.post("/pipeline/99999/stages/resume_screen/complete")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Pipeline run not found"

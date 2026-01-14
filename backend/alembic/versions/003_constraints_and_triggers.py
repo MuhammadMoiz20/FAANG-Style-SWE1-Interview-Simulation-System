@@ -15,7 +15,7 @@ branch_labels = None
 depends_on = None
 
 
-UPDATED_AT_TRIGGER_SQL = """
+POSTGRESQL_UPDATED_AT_TRIGGER_SQL = """
 CREATE OR REPLACE FUNCTION set_updated_at_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -31,15 +31,28 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
 
     # Deduplicate stage_results before enforcing uniqueness.
-    op.execute(
-        """
-        DELETE FROM stage_results a
-        USING stage_results b
-        WHERE a.pipeline_run_id = b.pipeline_run_id
-          AND a.stage_name = b.stage_name
-          AND a.id < b.id;
-        """
-    )
+    if bind.dialect.name == "postgresql":
+        op.execute(
+            """
+            DELETE FROM stage_results a
+            USING stage_results b
+            WHERE a.pipeline_run_id = b.pipeline_run_id
+              AND a.stage_name = b.stage_name
+              AND a.id < b.id;
+            """
+        )
+    else:
+        # SQLite-compatible deduplication
+        op.execute(
+            """
+            DELETE FROM stage_results
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM stage_results
+                GROUP BY pipeline_run_id, stage_name
+            );
+            """
+        )
 
     existing_stage_indexes = {
         index["name"] for index in inspector.get_indexes("stage_results")
@@ -89,7 +102,15 @@ def upgrade() -> None:
             sqlite_where=sa.text("status IN ('created', 'in_progress')"),
         )
 
-    op.execute(UPDATED_AT_TRIGGER_SQL)
+    # Create updated_at triggers (PostgreSQL only)
+    # SQLite relies on SQLAlchemy's onupdate=func.now() in the ORM models
+    if bind.dialect.name == "postgresql":
+        _create_postgresql_updated_at_triggers(op)
+
+
+def _create_postgresql_updated_at_triggers(op):
+    """Create PostgreSQL triggers for auto-updating updated_at."""
+    op.execute(POSTGRESQL_UPDATED_AT_TRIGGER_SQL)
     for table in ("candidates", "job_profiles", "pipeline_runs", "stage_results"):
         op.execute(f"DROP TRIGGER IF EXISTS trg_set_updated_at_{table} ON {table}")
         op.execute(
@@ -101,6 +122,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+
+    if bind.dialect.name == "postgresql":
+        _drop_postgresql_updated_at_triggers(op)
+
+
+def _drop_postgresql_updated_at_triggers(op):
+    """Drop PostgreSQL triggers."""
     for table in ("candidates", "job_profiles", "pipeline_runs", "stage_results"):
         op.execute(f"DROP TRIGGER IF EXISTS trg_set_updated_at_{table} ON {table}")
     op.execute("DROP FUNCTION IF EXISTS set_updated_at_timestamp()")

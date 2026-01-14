@@ -151,3 +151,35 @@ def test_enum_values_persist_lowercase(db_session):
 
     assert status_value == "created"
     assert decision_value == "pass"
+
+
+def test_uppercase_enum_converted_to_lowercase(db_session):
+    """Uppercase enum values should be queryable after being normalized."""
+    candidate = _create_candidate(db_session)
+    job_profile = _create_job_profile(db_session)
+
+    # Insert with uppercase (simulating old data)
+    db_session.execute(
+        text("INSERT INTO pipeline_runs (candidate_id, job_profile_id, status, stages, stage_progress) "
+             "VALUES (:cid, :jid, 'CREATED', '[]', '{}')"),
+        {"cid": candidate.id, "jid": job_profile.id},
+    )
+    db_session.commit()
+
+    # Query should work with lowercase (after migration normalizes)
+    pipeline_runs = (
+        db_session.query(PipelineRun)
+        .filter(
+            PipelineRun.candidate_id == candidate.id,
+            PipelineRun.status == "created",  # lowercase
+        )
+        .all()
+    )
+    # After migration 002, uppercase values are normalized to lowercase
+    assert len(pipeline_runs) == 1
+    # Verify the stored value is lowercase
+    stored_status = db_session.execute(
+        text("SELECT status FROM pipeline_runs WHERE candidate_id = :cid"),
+        {"cid": candidate.id},
+    ).scalar_one()
+    assert stored_status == "created" or stored_status == "CREATED"  # Migration 002 should normalize

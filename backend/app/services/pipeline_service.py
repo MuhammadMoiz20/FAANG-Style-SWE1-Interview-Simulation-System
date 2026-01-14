@@ -1,5 +1,6 @@
 """Pipeline service functions."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
@@ -19,10 +20,18 @@ from app.schemas.stage_result import StageResultCompleteRequest
 from app.services.pipeline_planner import PipelinePlanner
 
 
+logger = logging.getLogger(__name__)
+
+
 def start_pipeline_run(
     db: Session, candidate_id: int, job_profile_id: int
 ) -> Tuple[PipelineRun, bool]:
-    """Start a pipeline run, returning (run, created)."""
+    """Start a pipeline run, returning (run, created).
+
+    Returns:
+        Tuple of (pipeline_run, created) where created is True if a new run
+        was created, False if an existing active run was returned.
+    """
     planner = PipelinePlanner()
     try:
         with db.begin():
@@ -69,8 +78,14 @@ def start_pipeline_run(
             db.add(pipeline_run)
             db.flush()
             return pipeline_run, True
-    except IntegrityError:
+    except IntegrityError as exc:
+        # Concurrent insert attempt - find and return the existing run
         db.rollback()
+        logger.info(
+            "Concurrent pipeline start detected for candidate_id=%s, job_profile_id=%s",
+            candidate_id,
+            job_profile_id,
+        )
         existing = (
             db.query(PipelineRun)
             .filter(
@@ -82,7 +97,11 @@ def start_pipeline_run(
         )
         if existing:
             return existing, False
-        raise
+        # If no existing run found, this is an unexpected integrity error
+        raise HTTPException(
+            status_code=409,
+            detail="Could not create pipeline run due to a conflict. Please try again.",
+        ) from exc
 
 
 def advance_pipeline_run(db: Session, pipeline_id: int) -> PipelineRun:
